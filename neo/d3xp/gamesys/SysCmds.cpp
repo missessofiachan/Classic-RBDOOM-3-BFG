@@ -2794,6 +2794,8 @@ void idGameLocal::InitConsoleCommands()
 	cmdSystem->AddCommand( "testid",				Cmd_TestId_f,				CMD_FL_GAME | CMD_FL_CHEAT,	"output the string for the specified id." );
 	
 	cmdSystem->AddCommand( "setActorState",			Cmd_SetActorState_f,		CMD_FL_GAME | CMD_FL_CHEAT,	"Manually sets an actors script state", idGameLocal::ArgCompletion_EntityName );
+	cmdSystem->AddCommand( "addbot",				idMultiplayerGame::AddBot_f,CMD_FL_GAME,				"adds a bot to the game" );
+	cmdSystem->AddCommand( "fillbots",				idMultiplayerGame::FillBots_f,CMD_FL_GAME,				"fills the server with bots" );
 }
 
 /*

@@ -173,6 +173,8 @@ public:
 	static void		MessageMode_f( const idCmdArgs& args );
 	static void		VoiceChat_f( const idCmdArgs& args );
 	static void		VoiceChatTeam_f( const idCmdArgs& args );
+	static void		AddBot_f( const idCmdArgs& args );
+	static void		FillBots_f( const idCmdArgs& args );
 	
 	int				NumActualClients( bool countSpectators, int* teamcount = NULL );
 	void			DropWeapon( int clientNum );

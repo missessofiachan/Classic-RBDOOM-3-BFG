@@ -2928,6 +2928,73 @@ void idMultiplayerGame::MessageMode_f( const idCmdArgs& args )
 
 /*
 ================
+idMultiplayerGame::AddBot_f
+================
+*/
+void idMultiplayerGame::AddBot_f( const idCmdArgs& args )
+{
+	if( !common->IsMultiplayer() || common->IsClient() )
+	{
+		return;
+	}
+	
+	idStr botName = "Bot";
+	if( args.Argc() > 1 )
+	{
+		botName = args.Argv( 1 );
+	}
+	
+	idLobbyBase& lobby = session->GetActingGameStateLobbyBase();
+	if ( lobby.IsLobbyFull() ) {
+		gameLocal->Printf( "Lobby is full, cannot add bot.\n" );
+		return;
+	}
+	
+	lobbyUserID_t botId = lobby.AllocLobbyUserSlotForBot( botName.c_str() );
+	if ( botId.IsValid() ) {
+		gameLocal->Printf( "Added bot: %s\n", botName.c_str() );
+	} else {
+		gameLocal->Printf( "Failed to allocate slot for bot.\n" );
+	}
+}
+
+/*
+================
+idMultiplayerGame::FillBots_f
+================
+*/
+void idMultiplayerGame::FillBots_f( const idCmdArgs& args )
+{
+	if( !common->IsMultiplayer() || common->IsClient() )
+	{
+		return;
+	}
+	
+	idLobbyBase& lobby = session->GetActingGameStateLobbyBase();
+	int maxSlots = lobby.GetMatchParms().numSlots;
+	int currentPlayers = lobby.GetNumLobbyUsers();
+	int added = 0;
+	
+	static const char* botNames[] = {
+		"Phobos", "Crash", "Doom", "Major", "Sarge", "Grunt", "Hunter", "Keel",
+		"Klesk", "Lucy", "Mynx", "Orbb", "Ranger", "Razor", "Slash", "TankJr"
+	};
+	int numBotNames = sizeof(botNames) / sizeof(botNames[0]);
+	
+	for ( int i = currentPlayers; i < maxSlots; i++ ) {
+		if ( lobby.IsLobbyFull() ) {
+			break;
+		}
+		idStr botName = botNames[ i % numBotNames ];
+		if ( lobby.AllocLobbyUserSlotForBot( botName.c_str() ).IsValid() ) {
+			added++;
+		}
+	}
+	gameLocal->Printf( "Filled match with %d bots.\n", added );
+}
+
+/*
+================
 idMultiplayerGame::MessageMode
 ================
 */

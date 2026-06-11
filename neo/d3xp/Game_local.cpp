@@ -3000,6 +3000,11 @@ position and firecount to the usercmd.
 */
 void idGameLocal::RunSingleUserCmd( usercmd_t& cmd, idPlayer& player )
 {
+	if( player.isBot )
+	{
+		player.BotAI( cmd );
+	}
+	
 	player.HandleUserCmds( cmd );
 	
 	// To fix the stupid chaingun script that depends on frame counts instead of

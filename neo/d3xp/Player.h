@@ -412,6 +412,13 @@ public:
 	bool					lastManPlayAgain;	// play again when end game delay is cancelled out before expiring (srv only)
 	bool					lastManPresent;		// true when player was in when game started (spectators can't join a running LMS)
 	bool					isLagged;			// replicated from server, true if packets haven't been received from client.
+	bool					isBot;				// true if this player is controlled by AI bot logic.
+	idEntityPtr<idEntity>	botTargetItem;
+	int						botNextTargetSearchTime;
+	idVec3					botTargetPos;
+	bool					botHasTargetPos;
+	float					botWanderYaw;
+	int						botWanderTime;
 	int						isChatting;			// replicated from server, true if the player is chatting.
 	
 	// timers
@@ -446,6 +453,7 @@ public:
 	
 	void					Spawn();
 	void					Think();
+	void					BotAI( usercmd_t& cmd );
 	
 	void					UpdateLaserSight();
 	

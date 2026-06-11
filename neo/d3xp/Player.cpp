@@ -30,6 +30,7 @@ If you have questions concerning this license or the applicable additional terms
 #pragma hdrstop
 
 #include "Game_local.h"
+#include "../aas/AASFile.h"
 //#include "../framework/Common_dialog.h"
 //#include "../framework/Common_local.h"
 #include "PredictedValue_impl.h"
@@ -1669,6 +1670,13 @@ idPlayer::idPlayer():
 	isTelefragged			= false;
 	
 	isLagged				= false;
+	isBot					= false;
+	botTargetItem			= NULL;
+	botNextTargetSearchTime	= 0;
+	botTargetPos.Zero();
+	botHasTargetPos			= false;
+	botWanderYaw			= 0.0f;
+	botWanderTime			= 0;
 	isChatting				= 0;
 	
 	selfSmooth				= false;
@@ -2048,6 +2056,11 @@ void idPlayer::Spawn()
 	if( entityNumber >= MAX_CLIENTS )
 	{
 		gameLocal->Error( "entityNum > MAX_CLIENTS for player.  Player may only be spawned with a client." );
+	}
+
+	if( common->IsMultiplayer() )
+	{
+		isBot = session->GetActingGameStateLobbyBase().GetLobbyUserIsBot( gameLocal->lobbyUserIDs[entityNumber] );
 	}
 	
 	// allow thinking during cinematics
@@ -7219,7 +7232,11 @@ void idPlayer::UpdateViewAngles()
 	for( i = 0; i < 3; i++ )
 	{
 		cmdAngles[i] = SHORT2ANGLE( usercmd.angles[i] );
-		if( influenceActive == INFLUENCE_LEVEL3 )
+		if( isBot )
+		{
+			viewAngles[i] = cmdAngles[i];
+		}
+		else if( influenceActive == INFLUENCE_LEVEL3 )
 		{
 			viewAngles[i] += idMath::ClampFloat( -1.0f, 1.0f, idMath::AngleDelta( idMath::AngleNormalize180( SHORT2ANGLE( usercmd.angles[i] ) + deltaViewAngles[i] ) , viewAngles[i] ) );
 		}
@@ -7227,6 +7244,10 @@ void idPlayer::UpdateViewAngles()
 		{
 			viewAngles[i] = idMath::AngleNormalize180( SHORT2ANGLE( usercmd.angles[i] ) + deltaViewAngles[i] );
 		}
+	}
+	if( isBot )
+	{
+		deltaViewAngles.Zero();
 	}
 	if( !centerView.IsDone( gameLocal->time ) )
 	{
@@ -13109,4 +13130,265 @@ gameExpansionType_t idPlayer::GetExpansionType() const
 		return GAME_D3LE;
 	}
 	return GAME_UNKNOWN;
+}
+
+idCVar bot_skill( "bot_skill", "1", CVAR_INTEGER | CVAR_GAME, "Bot skill level (0 = Easy, 1 = Medium, 2 = Hard, 3 = Nightmare)" );
+
+/*
+==================
+idPlayer::BotAI
+==================
+*/
+void idPlayer::BotAI( usercmd_t& cmd )
+{
+	// Clear the command
+	cmd.buttons = 0;
+	cmd.forwardmove = 0;
+	cmd.rightmove = 0;
+	cmd.impulse = 0;
+
+	// If spectating or dead, we want to respawn/join!
+	if ( spectating || health <= 0 ) {
+		cmd.buttons |= BUTTON_ATTACK;
+		return;
+	}
+
+	// 1. Find nearest enemy player
+	idPlayer* nearestEnemy = NULL;
+	float nearestEnemyDist = 999999.0f;
+	bool enemyVisible = false;
+	idVec3 myEye = GetEyePosition();
+	idVec3 myOrigin = GetPhysics()->GetOrigin();
+
+	for ( int i = 0; i < MAX_PLAYERS; i++ ) {
+		if ( i == entityNumber ) {
+			continue;
+		}
+		idEntity* ent = gameLocal->entities[i];
+		if ( !ent || !ent->IsType( idPlayer::Type ) ) {
+			continue;
+		}
+		idPlayer* other = static_cast<idPlayer*>( ent );
+		if ( other->health <= 0 || other->spectating ) {
+			continue;
+		}
+		// If team play, don't shoot teammates
+		if ( gameLocal->mpGame.IsGametypeTeamBased() && other->team == team ) {
+			continue;
+		}
+
+		float dist = ( other->GetPhysics()->GetOrigin() - myOrigin ).Length();
+		if ( dist < nearestEnemyDist ) {
+			nearestEnemyDist = dist;
+			nearestEnemy = other;
+		}
+	}
+
+	// Check Line of Sight to nearest enemy
+	if ( nearestEnemy != NULL ) {
+		trace_t tr;
+		gameLocal->GetClip()->Translation( tr, myEye, nearestEnemy->GetEyePosition(), NULL, mat3_identity, MASK_SHOT_RENDERMODEL, this );
+		if ( tr.fraction >= 1.0f || tr.c.entityNum == nearestEnemy->entityNumber ) {
+			enemyVisible = true;
+		}
+	}
+
+	// 2. Determine target position
+	if ( enemyVisible && nearestEnemy ) {
+		botTargetPos = nearestEnemy->GetPhysics()->GetOrigin();
+		botHasTargetPos = true;
+	} else {
+		// Search for nearest active item if we don't have a visible enemy
+		if ( gameLocal->time >= botNextTargetSearchTime || !botTargetItem.GetEntity() || botTargetItem->IsHidden() ) {
+			botNextTargetSearchTime = gameLocal->time + 1000; // Search once every second
+			idEntity* bestItem = NULL;
+			float bestItemDist = 999999.0f;
+
+			for ( int j = 0; j < gameLocal->num_entities; j++ ) {
+				idEntity* ent = gameLocal->entities[j];
+				if ( !ent ) {
+					continue;
+				}
+				if ( ent->IsHidden() ) {
+					continue;
+				}
+				if ( !ent->IsType( idItem::Type ) ) {
+					continue;
+				}
+				float d = ( ent->GetPhysics()->GetOrigin() - myOrigin ).Length();
+				if ( d < bestItemDist ) {
+					bestItemDist = d;
+					bestItem = ent;
+				}
+			}
+			botTargetItem = bestItem;
+		}
+
+		if ( botTargetItem.GetEntity() ) {
+			botTargetPos = botTargetItem->GetPhysics()->GetOrigin();
+			botHasTargetPos = true;
+		} else if ( nearestEnemy ) {
+			// No items visible, hunt nearest enemy even if they are behind a wall
+			botTargetPos = nearestEnemy->GetPhysics()->GetOrigin();
+			botHasTargetPos = true;
+		} else {
+			botHasTargetPos = false;
+		}
+	}
+
+	// 3. Navigation using AAS pathfinding
+	idVec3 moveDir( 0, 0, 0 );
+	bool hasMoveDir = false;
+	bool needJump = false;
+
+	// Retrieve AAS
+	idAAS* aas = gameLocal->GetAAS( "aas32" );
+	if ( !aas ) {
+		aas = gameLocal->GetAAS( "aas48" );
+	}
+	if ( !aas ) {
+		for ( int i = 0; i < 8; ++i ) {
+			idAAS* a = gameLocal->GetAAS( i );
+			if ( a && a->GetSettings() ) {
+				aas = a;
+				break;
+			}
+		}
+	}
+
+	if ( aas && botHasTargetPos ) {
+		idBounds myBounds = GetPhysics()->GetBounds();
+		int myAreaNum = aas->PointReachableAreaNum( myOrigin, myBounds, AREA_REACHABLE_WALK );
+		int targetAreaNum = aas->PointReachableAreaNum( botTargetPos, myBounds, AREA_REACHABLE_WALK );
+
+		if ( myAreaNum > 0 && targetAreaNum > 0 ) {
+			aasPath_t path;
+			idVec3 org = myOrigin;
+			aas->PushPointIntoAreaNum( myAreaNum, org );
+			idVec3 goal = botTargetPos;
+			aas->PushPointIntoAreaNum( targetAreaNum, goal );
+
+			if ( aas->WalkPathToGoal( path, myAreaNum, org, targetAreaNum, goal, TFL_WALK | TFL_AIR ) ) {
+				moveDir = path.moveGoal - myOrigin;
+				hasMoveDir = true;
+
+				if ( path.type == PATHTYPE_BARRIERJUMP || path.type == PATHTYPE_JUMP || moveDir.z > 24.0f ) {
+					needJump = true;
+				}
+			}
+		}
+	}
+
+	// Fallback to simple direct movement or wander if AAS failed or is not available
+	if ( !hasMoveDir ) {
+		if ( botHasTargetPos ) {
+			moveDir = botTargetPos - myOrigin;
+			hasMoveDir = true;
+		} else {
+			// Wander in a straight direction, change if blocked
+			if ( gameLocal->time >= botWanderTime || physicsObj.GetLinearVelocity().Length() < 5.0f ) {
+				botWanderTime = gameLocal->time + 2000 + gameLocal->random.RandomInt( 2001 );
+				botWanderYaw = gameLocal->random.RandomFloat() * 360.0f;
+				if ( physicsObj.GetLinearVelocity().Length() < 5.0f ) {
+					needJump = true;
+					botWanderYaw += 180.0f;
+				}
+			}
+			moveDir = idAngles( 0, botWanderYaw, 0 ).ToForward();
+			hasMoveDir = true;
+		}
+	}
+
+	// 4. Aiming / Rotation control
+	int skill = bot_skill.GetInteger();
+	float maxRotationPerFrame = 360.0f;
+	bool skipShoot = false;
+
+	if ( skill == 0 ) {
+		maxRotationPerFrame = 6.0f;
+		skipShoot = ( ( gameLocal->time % 10 ) < 4 );
+	} else if ( skill == 1 ) {
+		maxRotationPerFrame = 15.0f;
+		skipShoot = ( ( gameLocal->time % 10 ) < 2 );
+	} else if ( skill == 2 ) {
+		maxRotationPerFrame = 45.0f;
+	}
+
+	if ( enemyVisible && nearestEnemy ) {
+		// Face enemy eye position
+		idVec3 dirToEnemy = nearestEnemy->GetEyePosition() - myEye;
+		dirToEnemy.Normalize();
+		idAngles faceAngles = dirToEnemy.ToAngles();
+
+		idAngles currentAngles = viewAngles;
+		idAngles delta = faceAngles - currentAngles;
+		delta.Normalize180();
+
+		faceAngles[0] = currentAngles[0] + idMath::ClampFloat( -maxRotationPerFrame, maxRotationPerFrame, delta[0] );
+		faceAngles[1] = currentAngles[1] + idMath::ClampFloat( -maxRotationPerFrame, maxRotationPerFrame, delta[1] );
+		faceAngles[2] = 0;
+		faceAngles.Normalize180();
+
+		cmd.angles[0] = ANGLE2SHORT( faceAngles[0] );
+		cmd.angles[1] = ANGLE2SHORT( faceAngles[1] );
+		cmd.angles[2] = 0;
+	} else if ( hasMoveDir ) {
+		// Face movement direction smoothly if no target
+		idVec3 lookDir = moveDir;
+		lookDir.z = 0;
+		if ( lookDir.Length() > 0.1f ) {
+			lookDir.Normalize();
+			idAngles faceAngles = lookDir.ToAngles();
+
+			idAngles currentAngles = viewAngles;
+			idAngles delta = faceAngles - currentAngles;
+			delta.Normalize180();
+
+			faceAngles[1] = currentAngles[1] + idMath::ClampFloat( -15.0f, 15.0f, delta[1] );
+			faceAngles[0] = 0; // Look straight
+			faceAngles[2] = 0;
+			faceAngles.Normalize180();
+
+			cmd.angles[0] = ANGLE2SHORT( faceAngles[0] );
+			cmd.angles[1] = ANGLE2SHORT( faceAngles[1] );
+			cmd.angles[2] = 0;
+		}
+	}
+
+	// 5. Movement relative to view angles
+	if ( hasMoveDir ) {
+		idVec3 desiredVelocity = moveDir;
+		desiredVelocity.z = 0;
+		if ( desiredVelocity.Length() > 0.1f ) {
+			desiredVelocity.Normalize();
+			idAngles viewYaw( 0, viewAngles.yaw, 0 );
+			idVec3 forward, right;
+			viewYaw.ToVectors( &forward, &right );
+
+			float forwardSpeed = desiredVelocity * forward;
+			float rightSpeed = desiredVelocity * right;
+
+			cmd.forwardmove = idMath::ClampInt( -127, 127, (int)( forwardSpeed * 127.0f ) );
+			cmd.rightmove = idMath::ClampInt( -127, 127, (int)( rightSpeed * 127.0f ) );
+		}
+	}
+
+	// 6. Action / Shooting Logic
+	if ( enemyVisible && nearestEnemyDist < 1200.0f && !skipShoot ) {
+		cmd.buttons |= BUTTON_ATTACK;
+	}
+
+	// Random jump/dodge in combat, or jump if stuck
+	if ( enemyVisible ) {
+		int jumpInterval = ( skill >= 3 ) ? 1500 : 3000;
+		if ( ( gameLocal->time % jumpInterval ) < 200 ) {
+			needJump = true;
+		}
+	} else if ( physicsObj.GetLinearVelocity().Length() < 5.0f && ( gameLocal->time % 2000 ) < 200 ) {
+		needJump = true;
+	}
+
+	if ( needJump ) {
+		cmd.buttons |= BUTTON_JUMP;
+	}
 }
