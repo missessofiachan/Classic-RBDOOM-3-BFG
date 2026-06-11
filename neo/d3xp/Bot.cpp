@@ -186,7 +186,28 @@ void idPlayer::BotAI(usercmd_t &cmd) {
     }
     else {
       // Scenario E: Both flags at base
-      bool isDefender = (entityNumber % 2 == 0);
+      // Calculate how many bots are on our team and our team-specific rank
+      int teamSize = 0;
+      int myTeamRank = 0;
+      for (int k = 0; k < gameLocal->numClients; k++) {
+        idEntity* ent = gameLocal->entities[k];
+        if (ent && ent->IsType(idPlayer::Type)) {
+          idPlayer* player = static_cast<idPlayer*>(ent);
+          if (player->team == team && player->isBot) {
+            teamSize++;
+            if (k < entityNumber) {
+              myTeamRank++;
+            }
+          }
+        }
+      }
+
+      // 20% defenders (1 in 5). If team size is small, we prioritize attacking.
+      bool isDefender = false;
+      if (teamSize >= 3) {
+        isDefender = (myTeamRank % 5 == 0);
+      }
+
       if (isDefender) {
         // Defend our flag base
         if (enemyVisible && nearestEnemy && nearestEnemyDist < 600.0f) {
