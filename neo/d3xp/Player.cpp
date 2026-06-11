@@ -13193,7 +13193,21 @@ void idPlayer::BotAI( usercmd_t& cmd )
 		}
 	}
 
-	// 2. Determine target position
+	// 2. Retrieve AAS & Determine target position
+	idAAS* aas = gameLocal->GetAAS( "aas32" );
+	if ( !aas ) {
+		aas = gameLocal->GetAAS( "aas48" );
+	}
+	if ( !aas ) {
+		for ( int i = 0; i < 8; ++i ) {
+			idAAS* a = gameLocal->GetAAS( i );
+			if ( a && a->GetSettings() ) {
+				aas = a;
+				break;
+			}
+		}
+	}
+
 	if ( enemyVisible && nearestEnemy ) {
 		botTargetPos = nearestEnemy->GetPhysics()->GetOrigin();
 		botHasTargetPos = true;
@@ -13224,15 +13238,33 @@ void idPlayer::BotAI( usercmd_t& cmd )
 			botTargetItem = bestItem;
 		}
 
-		if ( botTargetItem.GetEntity() ) {
-			botTargetPos = botTargetItem->GetPhysics()->GetOrigin();
-			botHasTargetPos = true;
-		} else if ( nearestEnemy ) {
-			// No items visible, hunt nearest enemy even if they are behind a wall
-			botTargetPos = nearestEnemy->GetPhysics()->GetOrigin();
-			botHasTargetPos = true;
+		if ( aas ) {
+			if ( botTargetItem.GetEntity() ) {
+				botTargetPos = botTargetItem->GetPhysics()->GetOrigin();
+				botHasTargetPos = true;
+			} else if ( nearestEnemy ) {
+				botTargetPos = nearestEnemy->GetPhysics()->GetOrigin();
+				botHasTargetPos = true;
+			} else {
+				botHasTargetPos = false;
+			}
 		} else {
-			botHasTargetPos = false;
+			// No AAS: Only target the item if it's directly visible
+			bool itemVisible = false;
+			if ( botTargetItem.GetEntity() ) {
+				trace_t trItem;
+				gameLocal->GetClip()->Translation( trItem, myEye, botTargetItem->GetPhysics()->GetOrigin() + idVec3(0,0,16), NULL, mat3_identity, MASK_SHOT_RENDERMODEL, this );
+				if ( trItem.fraction >= 1.0f ) {
+					itemVisible = true;
+				}
+			}
+
+			if ( itemVisible && botTargetItem.GetEntity() ) {
+				botTargetPos = botTargetItem->GetPhysics()->GetOrigin();
+				botHasTargetPos = true;
+			} else {
+				botHasTargetPos = false;
+			}
 		}
 	}
 
@@ -13240,21 +13272,6 @@ void idPlayer::BotAI( usercmd_t& cmd )
 	idVec3 moveDir( 0, 0, 0 );
 	bool hasMoveDir = false;
 	bool needJump = false;
-
-	// Retrieve AAS
-	idAAS* aas = gameLocal->GetAAS( "aas32" );
-	if ( !aas ) {
-		aas = gameLocal->GetAAS( "aas48" );
-	}
-	if ( !aas ) {
-		for ( int i = 0; i < 8; ++i ) {
-			idAAS* a = gameLocal->GetAAS( i );
-			if ( a && a->GetSettings() ) {
-				aas = a;
-				break;
-			}
-		}
-	}
 
 	if ( aas && botHasTargetPos ) {
 		idBounds myBounds = GetPhysics()->GetBounds();
@@ -13285,15 +13302,45 @@ void idPlayer::BotAI( usercmd_t& cmd )
 			moveDir = botTargetPos - myOrigin;
 			hasMoveDir = true;
 		} else {
-			// Wander in a straight direction, change if blocked
-			if ( gameLocal->time >= botWanderTime || physicsObj.GetLinearVelocity().Length() < 5.0f ) {
+			// Wander/Explore using sensory wall-avoidance steering
+			idVec3 forwardDir = idAngles( 0, botWanderYaw, 0 ).ToForward();
+			trace_t tr;
+			gameLocal->GetClip()->Translation( tr, myOrigin + idVec3(0,0,16), myOrigin + idVec3(0,0,16) + forwardDir * 80.0f, GetPhysics()->GetClipModel(), mat3_identity, MASK_PLAYERSOLID, this );
+
+			bool stuck = ( physicsObj.GetLinearVelocity().Length() < 5.0f && gameLocal->time > botWanderTime - 1500 );
+
+			if ( tr.fraction < 1.0f || stuck ) {
+				// Blocked! Check left and right to steer
+				float yawLeft = botWanderYaw + 90.0f;
+				float yawRight = botWanderYaw - 90.0f;
+
+				idVec3 dirLeft = idAngles( 0, yawLeft, 0 ).ToForward();
+				idVec3 dirRight = idAngles( 0, yawRight, 0 ).ToForward();
+
+				trace_t trLeft, trRight;
+				gameLocal->GetClip()->Translation( trLeft, myOrigin + idVec3(0,0,16), myOrigin + idVec3(0,0,16) + dirLeft * 80.0f, GetPhysics()->GetClipModel(), mat3_identity, MASK_PLAYERSOLID, this );
+				gameLocal->GetClip()->Translation( trRight, myOrigin + idVec3(0,0,16), myOrigin + idVec3(0,0,16) + dirRight * 80.0f, GetPhysics()->GetClipModel(), mat3_identity, MASK_PLAYERSOLID, this );
+
+				if ( trLeft.fraction < 0.3f && trRight.fraction < 0.3f ) {
+					// Both blocked, turn around
+					botWanderYaw += 180.0f + gameLocal->random.CRandomFloat() * 30.0f;
+				} else if ( trLeft.fraction >= trRight.fraction ) {
+					botWanderYaw = yawLeft + gameLocal->random.CRandomFloat() * 15.0f;
+				} else {
+					botWanderYaw = yawRight + gameLocal->random.CRandomFloat() * 15.0f;
+				}
+				botWanderYaw = idMath::AngleNormalize360( botWanderYaw );
+				botWanderTime = gameLocal->time + 1000 + gameLocal->random.RandomInt( 1001 );
+
+				if ( stuck ) {
+					needJump = true;
+				}
+			} else if ( gameLocal->time >= botWanderTime ) {
+				// Time to change direction randomly to explore
 				botWanderTime = gameLocal->time + 2000 + gameLocal->random.RandomInt( 2001 );
 				botWanderYaw = gameLocal->random.RandomFloat() * 360.0f;
-				if ( physicsObj.GetLinearVelocity().Length() < 5.0f ) {
-					needJump = true;
-					botWanderYaw += 180.0f;
-				}
 			}
+
 			moveDir = idAngles( 0, botWanderYaw, 0 ).ToForward();
 			hasMoveDir = true;
 		}
