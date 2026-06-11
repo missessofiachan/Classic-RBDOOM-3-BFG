@@ -769,6 +769,7 @@ set(GAMED3XP_INCLUDES
 	d3xp/AF.h
 	d3xp/AFEntity.h
 	d3xp/AimAssist.h
+	d3xp/Bot.h
 	d3xp/BrittleFracture.h
 	d3xp/Camera.h
 	d3xp/Classic.h
@@ -807,6 +808,7 @@ set(GAMED3XP_SOURCES
 	d3xp/AF.cpp
 	d3xp/AFEntity.cpp
 	d3xp/AimAssist.cpp
+	d3xp/Bot.cpp
 	d3xp/BrittleFracture.cpp
 	d3xp/Camera.cpp
 	d3xp/Classic.cpp

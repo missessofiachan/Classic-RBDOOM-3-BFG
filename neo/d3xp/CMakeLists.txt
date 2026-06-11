@@ -36,6 +36,7 @@ set(ID_GAME_INCLUDES
 	AF.h
 	AFEntity.h
 	AimAssist.h
+	Bot.h
 	BrittleFracture.h
 	Camera.h
 	Classic.h
@@ -74,6 +75,7 @@ set(ID_GAME_SOURCES
 	AF.cpp
 	AFEntity.cpp
 	AimAssist.cpp
+	Bot.cpp
 	BrittleFracture.cpp
 	Camera.cpp
 	Classic.cpp
