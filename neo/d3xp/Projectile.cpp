@@ -763,9 +763,14 @@ bool idProjectile::Collide( const trace_t& collision, const idVec3& velocity )
 				killedByImpact = false;
 			}
 			
+			bool isBotAttack = false;
+			if ( owner.GetEntity() && owner.GetEntity()->IsType( idPlayer::Type ) ) {
+				isBotAttack = static_cast<idPlayer*>( owner.GetEntity() )->isBot;
+			}
+			
 			// Only handle the server's own attacks here. Attacks by other players on the server occur through
-			// reliable messages.
-			if( !common->IsMultiplayer() || common->IsClient() || ( common->IsServer() && owner.GetEntityNum() == gameLocal->GetLocalClientNum() ) || ( common->IsServer() && !isHitscan ) )
+			// reliable messages. Bots are simulated on the server so they don't send reliable messages.
+			if( !common->IsMultiplayer() || common->IsClient() || ( common->IsServer() && owner.GetEntityNum() == gameLocal->GetLocalClientNum() ) || ( common->IsServer() && !isHitscan ) || ( common->IsServer() && isBotAttack ) )
 			{
 				ent->Damage( this, owner.GetEntity(), dir, damageDefName, damageScale, CLIPMODEL_ID_TO_JOINT_HANDLE( collision.c.id ) );
 			}

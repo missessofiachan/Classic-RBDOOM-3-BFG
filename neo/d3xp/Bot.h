@@ -1,22 +1,35 @@
 /*
 ===========================================================================
-
 Doom 3 BFG Edition GPL Source Code
-Copyright (C) 1993-2012 id Software LLC, a ZeniMax Media company.
-
-This file is part of the Doom 3 BFG Edition GPL Source Code ("Doom 3 BFG Edition Source Code").
-
-Doom 3 BFG Edition Source Code is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
 ===========================================================================
 */
 
 #ifndef __BOT_H__
 #define __BOT_H__
 
-// Bot AI helper structures, constants, or classes can be declared here.
+// A clean struct to hold our bot's brain state without cluttering idPlayer
+struct BotState {
+  // Performance Throttling
+  int nextPathTime;
+  idVec3 cachedMoveDir;
+  bool cachedNeedJump;
+
+  // Combat & Weapon Systems
+  int nextWeaponSwitchTime;
+
+  // Combat Movement
+  int strafeDir;
+  int nextStrafeChangeTime;
+
+  // Constructor to initialize everything safely
+  BotState() {
+    nextPathTime = 0;
+    cachedMoveDir.Zero();
+    cachedNeedJump = false;
+    nextWeaponSwitchTime = 0;
+    strafeDir = 1;
+    nextStrafeChangeTime = 0;
+  }
+};
 
 #endif /* !__BOT_H__ */
