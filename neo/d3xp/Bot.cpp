@@ -156,57 +156,104 @@ void idPlayer::BotAI(usercmd_t &cmd) {
     }
   }
 
-  if (enemyVisible && nearestEnemy) {
-    botTargetPos = nearestEnemy->GetPhysics()->GetOrigin();
-    botHasTargetPos = true;
-  } else {
-    if (gameLocal->time >= botNextTargetSearchTime ||
-        !botTargetItem.GetEntity() || botTargetItem->IsHidden()) {
-      botNextTargetSearchTime = gameLocal->time + 1000;
-      idEntity *bestItem = NULL;
-      float bestItemDistSqr = 1e12f;
+  bool isCTF = gameLocal->mpGame.IsGametypeFlagBased();
+  idItemTeam* friendlyFlag = isCTF ? gameLocal->mpGame.GetTeamFlag(team) : NULL;
+  idItemTeam* enemyFlag = isCTF ? gameLocal->mpGame.GetTeamFlag(1 - team) : NULL;
 
-      for (int j = 0; j < gameLocal->num_entities; j++) {
-        idEntity *ent = gameLocal->entities[j];
-        if (!ent || ent->IsHidden() || !ent->IsType(idItem::Type))
-          continue;
+  if (isCTF && friendlyFlag && enemyFlag) {
+    int enemyCarrierIdx = gameLocal->mpGame.GetFlagCarrier(1 - team);
+    idPlayer* enemyCarrier = (enemyCarrierIdx != -1) ? static_cast<idPlayer*>(gameLocal->entities[enemyCarrierIdx]) : NULL;
 
-        float dSqr = (ent->GetPhysics()->GetOrigin() - myOrigin).LengthSqr();
-        if (dSqr < bestItemDistSqr) {
-          bestItemDistSqr = dSqr;
-          bestItem = ent;
-        }
-      }
-      botTargetItem = bestItem;
+    if (carryingFlag) {
+      // Scenario A: Carrying enemy flag -> RUN HOME
+      botTargetPos = friendlyFlag->GetReturnOrigin();
+      botHasTargetPos = true;
     }
-
-    if (aas) {
-      if (botTargetItem.GetEntity()) {
-        botTargetPos = botTargetItem->GetPhysics()->GetOrigin();
-        botHasTargetPos = true;
-      } else if (nearestEnemy) {
-        botTargetPos = nearestEnemy->GetPhysics()->GetOrigin();
+    else if (friendlyFlag->carried && enemyCarrier) {
+      // Scenario B: Friendly flag is carried by an enemy -> HUNT THE CARRIER
+      botTargetPos = enemyCarrier->GetPhysics()->GetOrigin();
+      botHasTargetPos = true;
+    }
+    else if (friendlyFlag->dropped) {
+      // Scenario C: Friendly flag is dropped -> RETRIEVE IT
+      botTargetPos = friendlyFlag->GetPhysics()->GetOrigin();
+      botHasTargetPos = true;
+    }
+    else if (enemyFlag->dropped) {
+      // Scenario D: Enemy flag is dropped -> PICK IT UP
+      botTargetPos = enemyFlag->GetPhysics()->GetOrigin();
+      botHasTargetPos = true;
+    }
+    else {
+      // Scenario E: Both flags at base
+      bool isDefender = (entityNumber % 2 == 0);
+      if (isDefender) {
+        // Defend our flag base
+        if (enemyVisible && nearestEnemy && nearestEnemyDist < 600.0f) {
+          botTargetPos = nearestEnemy->GetPhysics()->GetOrigin();
+        } else {
+          botTargetPos = friendlyFlag->GetReturnOrigin();
+        }
         botHasTargetPos = true;
       } else {
-        botHasTargetPos = false;
+        // Attack enemy flag base
+        botTargetPos = enemyFlag->GetReturnOrigin();
+        botHasTargetPos = true;
       }
+    }
+  } else {
+    if (enemyVisible && nearestEnemy) {
+      botTargetPos = nearestEnemy->GetPhysics()->GetOrigin();
+      botHasTargetPos = true;
     } else {
-      bool itemVisible = false;
-      if (botTargetItem.GetEntity()) {
-        trace_t trItem;
-        gameLocal->GetClip()->Translation(
-            trItem, myEye,
-            botTargetItem->GetPhysics()->GetOrigin() + idVec3(0, 0, 16), NULL,
-            mat3_identity, MASK_SHOT_RENDERMODEL, this);
-        if (trItem.fraction >= 1.0f)
-          itemVisible = true;
+      if (gameLocal->time >= botNextTargetSearchTime ||
+          !botTargetItem.GetEntity() || botTargetItem->IsHidden()) {
+        botNextTargetSearchTime = gameLocal->time + 1000;
+        idEntity *bestItem = NULL;
+        float bestItemDistSqr = 1e12f;
+
+        for (int j = 0; j < gameLocal->num_entities; j++) {
+          idEntity *ent = gameLocal->entities[j];
+          if (!ent || ent->IsHidden() || !ent->IsType(idItem::Type))
+            continue;
+
+          float dSqr = (ent->GetPhysics()->GetOrigin() - myOrigin).LengthSqr();
+          if (dSqr < bestItemDistSqr) {
+            bestItemDistSqr = dSqr;
+            bestItem = ent;
+          }
+        }
+        botTargetItem = bestItem;
       }
 
-      if (itemVisible && botTargetItem.GetEntity()) {
-        botTargetPos = botTargetItem->GetPhysics()->GetOrigin();
-        botHasTargetPos = true;
+      if (aas) {
+        if (botTargetItem.GetEntity()) {
+          botTargetPos = botTargetItem->GetPhysics()->GetOrigin();
+          botHasTargetPos = true;
+        } else if (nearestEnemy) {
+          botTargetPos = nearestEnemy->GetPhysics()->GetOrigin();
+          botHasTargetPos = true;
+        } else {
+          botHasTargetPos = false;
+        }
       } else {
-        botHasTargetPos = false;
+        bool itemVisible = false;
+        if (botTargetItem.GetEntity()) {
+          trace_t trItem;
+          gameLocal->GetClip()->Translation(
+              trItem, myEye,
+              botTargetItem->GetPhysics()->GetOrigin() + idVec3(0, 0, 16), NULL,
+              mat3_identity, MASK_SHOT_RENDERMODEL, this);
+          if (trItem.fraction >= 1.0f)
+            itemVisible = true;
+        }
+
+        if (itemVisible && botTargetItem.GetEntity()) {
+          botTargetPos = botTargetItem->GetPhysics()->GetOrigin();
+          botHasTargetPos = true;
+        } else {
+          botHasTargetPos = false;
+        }
       }
     }
   }
@@ -450,16 +497,61 @@ void idPlayer::BotAI(usercmd_t &cmd) {
     needJump = true;
   }
 
-  if (needJump) {
-    cmd.buttons |= BUTTON_JUMP;
+  // 6.5 LEDGE AVOIDANCE
+  if (GetPhysics()->HasGroundContacts() &&
+      (cmd.forwardmove != 0 || cmd.rightmove != 0)) {
+    idAngles viewYaw(0, viewAngles.yaw, 0);
+    idVec3 forward, right;
+    viewYaw.ToVectors(&forward, &right);
+    idVec3 moveDir =
+        forward * (cmd.forwardmove / 127.0f) + right * (cmd.rightmove / 127.0f);
+    moveDir.z = 0;
+    if (moveDir.Normalize() > 0.1f) {
+      bool bypass = false;
+      if (botState.cachedMoveDir != vec3_origin) {
+        idVec3 pathDir = botState.cachedMoveDir;
+        pathDir.z = 0;
+        if (pathDir.Normalize() > 0.1f) {
+          if (moveDir * pathDir > 0.707f) {
+            bypass = true;
+          }
+        }
+      }
+
+      if (!bypass) {
+        trace_t tr;
+        idVec3 testPos = myOrigin + moveDir * 24.0f;
+        idVec3 start = testPos + idVec3(0, 0, 18.0f);
+        idVec3 end = testPos - idVec3(0, 0, 64.0f);
+        gameLocal->GetClip()->TracePoint(tr, start, end, MASK_PLAYERSOLID,
+                                         this);
+
+        if (tr.fraction >= 1.0f || (start.z - tr.endpos.z) > (18.0f + 40.0f)) {
+          // Ledge detected! Prevent movement and jumping in this direction
+          needJump = false;
+          cmd.buttons &= ~BUTTON_JUMP;
+
+          if (enemyVisible && nearestEnemy) {
+            // Flip strafe direction in combat
+            botState.strafeDir = -botState.strafeDir;
+            botState.nextStrafeChangeTime = gameLocal->time + 1000;
+            cmd.rightmove = botState.strafeDir * 127;
+            cmd.forwardmove = -127; // back up
+          } else {
+            // Wander fallback / navigate: back up and change direction
+            botWanderYaw = idMath::AngleNormalize360(
+                botWanderYaw + 180.0f +
+                gameLocal->random.CRandomFloat() * 45.0f);
+            botWanderTime = gameLocal->time + 1500;
+            cmd.forwardmove = 0;
+            cmd.rightmove = 0;
+          }
+        }
+      }
+    }
   }
 
-  // Diagnostic Print
-  static int nextPrintTime = 0;
-  if (gameLocal->time >= nextPrintTime) {
-    nextPrintTime = gameLocal->time + 2000;
-    const char *weapName = (currentWeapon >= 0 && currentWeapon < MAX_WEAPONS) ? spawnArgs.GetString(va("def_weapon%d", currentWeapon)) : "none";
-    gameLocal->Printf("Bot %s: currentWeapon=%d (%s), health=%d, enemyVisible=%d, buttons=%d\n",
-                      name.c_str(), currentWeapon, weapName, health, enemyVisible, cmd.buttons);
+  if (needJump) {
+    cmd.buttons |= BUTTON_JUMP;
   }
 }

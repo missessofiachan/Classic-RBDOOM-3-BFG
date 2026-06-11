@@ -59,3 +59,6 @@ neo/neo.kdev4
 /neo/libs/ex-openxr-populate1234/OpenXR-SDK-Source-release-1.1.37
 .idea/discord.xml
 .idea/.gitignore
+.idea/Classic-RBDOOM-3-BFG.iml
+.idea/modules.xml
+.idea/vcs.xml

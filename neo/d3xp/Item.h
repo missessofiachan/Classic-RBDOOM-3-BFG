@@ -254,6 +254,7 @@ public:
 	// TODO : turn this into a state :
 	bool					carried;			// is it beeing carried by a player?
 	bool					dropped;			// was it dropped?
+	const idVec3&			GetReturnOrigin() const { return returnOrigin; }
 	
 private:
 	idVec3					returnOrigin;
