@@ -1,4 +1,5 @@
-/*
+/* Statically linked to:                      │
+│   └── bot.lib (The AI Library)
 ===========================================================================
 Doom 3 BFG Edition GPL Source Code
 ===========================================================================
@@ -238,6 +239,14 @@ void idPlayer::BotAI(usercmd_t &cmd) {
           if (!ent || ent->IsHidden() || !ent->IsType(idItem::Type))
             continue;
 
+          const char* clsName = ent->GetClassname();
+          if (idStr::Icmpn(clsName, "item_medkit", 11) == 0 || idStr::Icmpn(clsName, "item_health", 11) == 0) {
+            if (this->health >= this->inventory.maxHealth) continue;
+          }
+          if (idStr::Icmpn(clsName, "item_armor", 10) == 0) {
+            if (this->inventory.armor >= this->inventory.maxarmor) continue;
+          }
+
           float dSqr = (ent->GetPhysics()->GetOrigin() - myOrigin).LengthSqr();
           if (dSqr < bestItemDistSqr) {
             bestItemDistSqr = dSqr;
@@ -397,7 +406,22 @@ void idPlayer::BotAI(usercmd_t &cmd) {
   }
 
   if (enemyVisible && nearestEnemy) {
-    idVec3 dirToEnemy = nearestEnemy->GetEyePosition() - myEye;
+    idVec3 enemyPos = nearestEnemy->GetEyePosition();
+    idVec3 enemyVel = nearestEnemy->GetPhysics()->GetLinearVelocity();
+
+    float projSpeed = 99999.0f; // hitscan
+    const char *currentWeaponName = spawnArgs.GetString(va("def_weapon%d", currentWeapon));
+    if (idStr::Icmp(currentWeaponName, "weapon_rocketlauncher") == 0) {
+      projSpeed = 900.0f;
+    } else if (idStr::Icmp(currentWeaponName, "weapon_plasma") == 0 || idStr::Icmp(currentWeaponName, "weapon_bfg") == 0) {
+      projSpeed = 800.0f;
+    }
+
+    float dist = (enemyPos - myEye).Length();
+    float timeToHit = dist / projSpeed;
+    idVec3 predictedPos = enemyPos + (enemyVel * timeToHit);
+
+    idVec3 dirToEnemy = predictedPos - myEye;
     dirToEnemy.Normalize();
     idAngles faceAngles = dirToEnemy.ToAngles();
 
@@ -515,7 +539,39 @@ void idPlayer::BotAI(usercmd_t &cmd) {
     }
   } else if (physicsObj.GetLinearVelocity().Length() < 5.0f &&
              (gameLocal->time % 2000) < 200) {
-    needJump = true;
+    idVec3 moveDirVec = physicsObj.GetLinearVelocity();
+    if (moveDirVec.Normalize() < 0.1f) {
+      idAngles viewYaw(0, viewAngles.yaw, 0);
+      idVec3 forward, right;
+      viewYaw.ToVectors(&forward, &right);
+      moveDirVec = forward * (cmd.forwardmove / 127.0f) + right * (cmd.rightmove / 127.0f);
+      moveDirVec.Normalize();
+    }
+    
+    trace_t trForward;
+    idVec3 start = myOrigin + idVec3(0, 0, 8);
+    idVec3 end = start + moveDirVec * 32.0f;
+    gameLocal->GetClip()->TracePoint(trForward, start, end, MASK_PLAYERSOLID, this);
+    
+    if (trForward.fraction < 1.0f) {
+      float maxJumpHeight = 48.0f;
+      idVec3 testTopStart = trForward.endpos + idVec3(0, 0, maxJumpHeight);
+      idVec3 testTopEnd = trForward.endpos;
+      
+      trace_t trHeight;
+      gameLocal->GetClip()->TracePoint(trHeight, testTopStart, testTopEnd, MASK_PLAYERSOLID, this);
+      
+      float obstacleHeight = trHeight.endpos.z - myOrigin.z;
+      if (obstacleHeight > 0.0f && obstacleHeight <= maxJumpHeight) {
+        needJump = true;
+      } else {
+        needJump = false;
+        botWanderYaw = idMath::AngleNormalize360(botWanderYaw + 90.0f + gameLocal->random.CRandomFloat() * 45.0f);
+        botWanderTime = gameLocal->time + 1000;
+      }
+    } else {
+      needJump = true;
+    }
   }
 
   // 6.5 LEDGE AVOIDANCE
