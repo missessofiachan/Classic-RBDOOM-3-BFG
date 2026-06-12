@@ -240,14 +240,8 @@ void idPlayer::BotAI(usercmd_t &cmd) {
             continue;
 
           idItem *item = static_cast<idItem *>(ent);
-          idDict attr;
-          item->GetAttributes(attr);
-
-          if (attr.FindKey("health")) {
-            if (this->health >= this->inventory.maxHealth) continue;
-          }
-          if (attr.FindKey("armor")) {
-            if (this->inventory.armor >= this->inventory.maxarmor) continue;
+          if (!this->GiveItem(item, 0)) {
+            continue;
           }
 
           float dSqr = (ent->GetPhysics()->GetOrigin() - myOrigin).LengthSqr();
