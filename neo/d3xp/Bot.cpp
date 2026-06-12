@@ -239,11 +239,14 @@ void idPlayer::BotAI(usercmd_t &cmd) {
           if (!ent || ent->IsHidden() || !ent->IsType(idItem::Type))
             continue;
 
-          const char* clsName = ent->GetClassname();
-          if (idStr::Icmpn(clsName, "item_medkit", 11) == 0 || idStr::Icmpn(clsName, "item_health", 11) == 0) {
+          idItem *item = static_cast<idItem *>(ent);
+          idDict attr;
+          item->GetAttributes(attr);
+
+          if (attr.FindKey("health")) {
             if (this->health >= this->inventory.maxHealth) continue;
           }
-          if (idStr::Icmpn(clsName, "item_armor", 10) == 0) {
+          if (attr.FindKey("armor")) {
             if (this->inventory.armor >= this->inventory.maxarmor) continue;
           }
 
