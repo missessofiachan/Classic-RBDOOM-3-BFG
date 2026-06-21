@@ -371,51 +371,28 @@ void idBotState::BotTargetPositionSelection(botFrameState_t& state) {
     if (state.enemyVisible && state.nearestEnemy) {
       botTargetPos = state.nearestEnemy->GetPhysics()->GetOrigin();
       botHasTargetPos = true;
+    } else if (currentGoalItem.GetEntity() && !currentGoalItem->IsHidden()) {
+      botTargetPos = currentGoalItem->GetPhysics()->GetOrigin();
+      botHasTargetPos = true;
     } else {
-      if (gameLocal->time >= botNextTargetSearchTime || !botTargetItem.GetEntity() || botTargetItem->IsHidden()) {
-        botNextTargetSearchTime = gameLocal->time + 1000;
-        idEntity *bestItem = NULL;
-        float bestItemDistSqr = 1e12f;
-
-        for (int j = 0; j < gameLocal->num_entities; j++) {
-          idEntity *ent = gameLocal->entities[j];
-          if (!ent || ent->IsHidden() || !ent->IsType(idItem::Type)) continue;
-
-          idItem *item = static_cast<idItem *>(ent);
-          if (!client->GiveItem(item, 0)) continue;
-
-          float dSqr = (ent->GetPhysics()->GetOrigin() - myOrigin).LengthSqr();
-          if (dSqr < bestItemDistSqr) {
-            bestItemDistSqr = dSqr;
-            bestItem = ent;
+      // 1. AAS-Based Roaming (Patrolling)
+      if (gameLocal->time >= botNextTargetSearchTime || !botHasTargetPos) {
+        botNextTargetSearchTime = gameLocal->time + 3000 + gameLocal->random.RandomInt(2000);
+        botHasTargetPos = false;
+        
+        if (aas && gameLocal->num_entities > 0) {
+          for (int attempts = 0; attempts < 10; attempts++) {
+            int randEntIndex = gameLocal->random.RandomInt(gameLocal->num_entities);
+            idEntity* ent = gameLocal->entities[randEntIndex];
+            if (ent && ent->GetPhysics()) {
+              int targetArea = aas->PointReachableAreaNum(ent->GetPhysics()->GetOrigin(), client->GetPhysics()->GetBounds(), AREA_REACHABLE_WALK);
+              if (targetArea > 0) {
+                botTargetPos = aas->AreaCenter(targetArea);
+                botHasTargetPos = true;
+                break;
+              }
+            }
           }
-        }
-        botTargetItem = bestItem;
-      }
-
-      if (aas) {
-        if (botTargetItem.GetEntity()) {
-          botTargetPos = botTargetItem->GetPhysics()->GetOrigin();
-          botHasTargetPos = true;
-        } else if (state.nearestEnemy) {
-          botTargetPos = state.nearestEnemy->GetPhysics()->GetOrigin();
-          botHasTargetPos = true;
-        } else {
-          botHasTargetPos = false;
-        }
-      } else {
-        bool itemVisible = false;
-        if (botTargetItem.GetEntity()) {
-          trace_t trItem;
-          gameLocal->GetClip()->Translation(trItem, myEye, botTargetItem->GetPhysics()->GetOrigin() + idVec3(0, 0, 16), NULL, mat3_identity, MASK_SHOT_RENDERMODEL, client);
-          if (trItem.fraction >= 1.0f) itemVisible = true;
-        }
-
-        if (itemVisible && botTargetItem.GetEntity()) {
-          botTargetPos = botTargetItem->GetPhysics()->GetOrigin();
-          botHasTargetPos = true;
-        } else {
-          botHasTargetPos = false;
         }
       }
     }
@@ -570,6 +547,19 @@ void idBotState::BotAimingAndRotation(usercmd_t& cmd, botFrameState_t& state) {
     float dist = (enemyPos - myEye).Length();
     float timeToHit = dist / projSpeed;
     idVec3 predictedPos = enemyPos + (enemyVel * timeToHit);
+
+    // 2. Fuzzy Aim Accuracy (Simulated Spread)
+    float aimAccuracy = personality.accuracy;
+    if (idStr::Icmp(currentWeaponName, "weapon_machinegun") == 0 || idStr::Icmp(currentWeaponName, "weapon_chaingun") == 0) {
+      aimAccuracy *= 0.8f; // Less accurate with spray weapons
+    } else if (idStr::Icmp(currentWeaponName, "weapon_shotgun") == 0) {
+      aimAccuracy *= 0.9f; 
+    }
+
+    float inaccuracyScale = (1.0f - aimAccuracy) * 64.0f; // up to 64 units off target
+    predictedPos.x += gameLocal->random.CRandomFloat() * inaccuracyScale;
+    predictedPos.y += gameLocal->random.CRandomFloat() * inaccuracyScale;
+    predictedPos.z += gameLocal->random.CRandomFloat() * inaccuracyScale * 0.5f;
 
     // 1. Radial Splash Aiming
     if (idStr::Icmp(currentWeaponName, "weapon_rocketlauncher") == 0) {
