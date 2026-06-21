@@ -423,21 +423,30 @@ void idBotState::BotNavigationPathfinding(botFrameState_t& state) {
     botCachedNeedJump = false;
 
     if (aas && botHasTargetPos) {
-      idBounds myBounds = client->GetPhysics()->GetBounds();
-      int myAreaNum = aas->PointReachableAreaNum(myOrigin, myBounds, AREA_REACHABLE_WALK);
-      int targetAreaNum = aas->PointReachableAreaNum(botTargetPos, myBounds, AREA_REACHABLE_WALK);
+      // 1. Direct Path Smoothing (ioq3 bypass)
+      trace_t directTr;
+      gameLocal->GetClip()->Translation(directTr, myOrigin + idVec3(0, 0, 16), botTargetPos + idVec3(0, 0, 16), client->GetPhysics()->GetClipModel(), mat3_identity, MASK_PLAYERSOLID, client);
+      
+      if (directTr.fraction == 1.0f) {
+        // Clear LOS to target! Bypass AAS graph completely to avoid robotic zigzagging.
+        botCachedMoveDir = botTargetPos - myOrigin;
+      } else {
+        idBounds myBounds = client->GetPhysics()->GetBounds();
+        int myAreaNum = aas->PointReachableAreaNum(myOrigin, myBounds, AREA_REACHABLE_WALK);
+        int targetAreaNum = aas->PointReachableAreaNum(botTargetPos, myBounds, AREA_REACHABLE_WALK);
 
-      if (myAreaNum > 0 && targetAreaNum > 0) {
-        aasPath_t path;
-        idVec3 org = myOrigin;
-        aas->PushPointIntoAreaNum(myAreaNum, org);
-        idVec3 goal = botTargetPos;
-        aas->PushPointIntoAreaNum(targetAreaNum, goal);
+        if (myAreaNum > 0 && targetAreaNum > 0) {
+          aasPath_t path;
+          idVec3 org = myOrigin;
+          aas->PushPointIntoAreaNum(myAreaNum, org);
+          idVec3 goal = botTargetPos;
+          aas->PushPointIntoAreaNum(targetAreaNum, goal);
 
-        if (aas->WalkPathToGoal(path, myAreaNum, org, targetAreaNum, goal, TFL_WALK | TFL_AIR)) {
-          botCachedMoveDir = path.moveGoal - myOrigin;
-          if (path.type == PATHTYPE_BARRIERJUMP || path.type == PATHTYPE_JUMP || botCachedMoveDir.z > 24.0f) {
-            botCachedNeedJump = true;
+          if (aas->WalkPathToGoal(path, myAreaNum, org, targetAreaNum, goal, TFL_WALK | TFL_AIR)) {
+            botCachedMoveDir = path.moveGoal - myOrigin;
+            if (path.type == PATHTYPE_BARRIERJUMP || path.type == PATHTYPE_JUMP || botCachedMoveDir.z > 24.0f) {
+              botCachedNeedJump = true;
+            }
           }
         }
       }
@@ -486,7 +495,30 @@ void idBotState::BotNavigationPathfinding(botFrameState_t& state) {
       state.hasMoveDir = true;
     }
   } else {
+    // 3. Smart Anti-Stuck Logic (ioq3 avoidreach)
+    if (botHasTargetPos && client->GetPhysics()->GetLinearVelocity().Length() < 5.0f) {
+      if (gameLocal->random.RandomFloat() > 0.8f) { // 20% chance to jump when stuck on a path
+        botCachedNeedJump = true;
+      }
+    }
+
     state.moveDir = botCachedMoveDir;
+    
+    // 2. Dynamic Obstacle Avoidance (ioq3 BotAvoidSpots)
+    idVec3 forwardDir = state.moveDir;
+    forwardDir.Normalize();
+    trace_t avoidTr;
+    gameLocal->GetClip()->Translation(avoidTr, myOrigin + idVec3(0, 0, 16), myOrigin + idVec3(0, 0, 16) + forwardDir * 120.0f, client->GetPhysics()->GetClipModel(), mat3_identity, MASK_PLAYERSOLID, client);
+    if (avoidTr.fraction < 1.0f && avoidTr.c.entityNum != ENTITYNUM_WORLD) {
+      // Dynamic entity blocking the way! Inject a perpendicular strafe to steer around it.
+      idVec3 rightDir = forwardDir.Cross(idVec3(0, 0, 1));
+      if (gameLocal->random.RandomFloat() > 0.5f) {
+        state.moveDir -= rightDir * 200.0f;
+      } else {
+        state.moveDir += rightDir * 200.0f;
+      }
+    }
+
     state.needJump = botCachedNeedJump;
     state.hasMoveDir = true;
   }
