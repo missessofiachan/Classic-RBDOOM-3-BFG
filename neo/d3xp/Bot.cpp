@@ -15,8 +15,8 @@ Doom 3 BFG Edition GPL Source Code
 #include "Bot.h"
 
 idCVar bot_skill(
-    "bot_skill", "1", CVAR_INTEGER | CVAR_GAME,
-    "Bot skill level (0 = Easy, 1 = Medium, 2 = Hard, 3 = Nightmare)");
+    "bot_skill", "4", CVAR_INTEGER | CVAR_GAME | CVAR_ARCHIVE,
+    "Bot skill level (0 = Easy, 1 = Normal, 2 = Hard, 3 = Nightmare, 4 = Adaptive)");
 
 
 
@@ -26,6 +26,51 @@ idBotState::EvaluateMapGoals
 ==================
 */
 void idBotState::EvaluateMapGoals(botFrameState_t &state) {
+  // Update Personality based on bot_skill
+  int skill = bot_skill.GetInteger();
+  if (skill == 4) {
+    // 4 = Adaptive difficulty based on local player's performance
+    idPlayer* localPlayer = gameLocal->GetLocalPlayer();
+    if (localPlayer) {
+      float kdRatio = 1.0f;
+      int kills = 0, deaths = 0;
+      if (common->IsMultiplayer()) {
+        const mpPlayerState_t& stats = gameLocal->mpGame.GetPlayerState(localPlayer->entityNumber);
+        kills = stats.fragCount;
+        deaths = stats.deaths;
+        if (deaths > 0) kdRatio = (float)kills / (float)deaths;
+        else kdRatio = kills + 1.0f;
+      }
+
+      float healthStrength = (localPlayer->health + localPlayer->inventory.armor) / 200.0f;
+      float humanStrength = healthStrength * 0.05f; // Base 5% on current health/armor
+      
+      // Add up to 95% based on KD ratio performance
+      if (kdRatio < 0.5f) humanStrength += 0.0f;
+      else if (kdRatio < 0.8f) humanStrength += 0.2f;
+      else if (kdRatio < 1.2f) humanStrength += 0.5f;
+      else if (kdRatio < 1.5f) humanStrength += 0.75f;
+      else humanStrength += 0.95f;
+
+      humanStrength = idMath::ClampFloat(0.1f, 1.0f, humanStrength);
+      
+      personality.accuracy += (humanStrength - personality.accuracy) * 0.1f;
+      personality.aggression += (humanStrength - personality.aggression) * 0.1f;
+      personality.jumpFrequency += (humanStrength - personality.jumpFrequency) * 0.1f;
+    }
+  } else {
+    // Fixed Difficulty presets
+    if (skill == 0) {
+      personality.accuracy = 0.2f; personality.aggression = 0.2f; personality.jumpFrequency = 0.1f;
+    } else if (skill == 1) {
+      personality.accuracy = 0.5f; personality.aggression = 0.5f; personality.jumpFrequency = 0.3f;
+    } else if (skill == 2) {
+      personality.accuracy = 0.8f; personality.aggression = 0.8f; personality.jumpFrequency = 0.6f;
+    } else {
+      personality.accuracy = 1.0f; personality.aggression = 1.0f; personality.jumpFrequency = 1.0f;
+    }
+  }
+
   if (gameLocal->time < botNextTargetSearchTime) {
     return;
   }
@@ -522,12 +567,8 @@ void idBotState::BotNavigationPathfinding(botFrameState_t& state) {
 }
 
 void idBotState::BotAimingAndRotation(usercmd_t& cmd, botFrameState_t& state) {
-  int skill = bot_skill.GetInteger();
-  float maxRotationPerFrame = 360.0f;
-  
-  if (skill == 0) maxRotationPerFrame = 6.0f;
-  else if (skill == 1) maxRotationPerFrame = 15.0f;
-  else if (skill == 2) maxRotationPerFrame = 45.0f;
+  // Turn speed scales dynamically with accuracy
+  float maxRotationPerFrame = 6.0f + (personality.accuracy * 40.0f);
 
   idVec3 myEye = client->GetEyePosition();
 
@@ -610,10 +651,9 @@ idBotState::BotActionAndEvasion
 ==================
 */
 void idBotState::BotActionAndEvasion(usercmd_t& cmd, botFrameState_t& state) {
-  int skill = bot_skill.GetInteger();
   bool skipShoot = false;
-  if (skill == 0) skipShoot = ((gameLocal->time % 10) < 4);
-  else if (skill == 1) skipShoot = ((gameLocal->time % 10) < 2);
+  if (personality.aggression < 0.4f) skipShoot = ((gameLocal->time % 10) < 4);
+  else if (personality.aggression < 0.7f) skipShoot = ((gameLocal->time % 10) < 2);
 
   // 3. Fire Throttling / Trigger Discipline
   const char *currentWeaponName = "";
@@ -697,12 +737,12 @@ void idBotState::BotActionAndEvasion(usercmd_t& cmd, botFrameState_t& state) {
       cmd.buttons |= BUTTON_ATTACK;
     }
 
-    if (skill > 0) {
-      int jumpInterval = (skill >= 3) ? 1200 : 2500;
+    if (personality.jumpFrequency > 0.2f) {
+      int jumpInterval = (personality.jumpFrequency >= 0.8f) ? 1200 : 2500;
       if ((gameLocal->time % jumpInterval) < 150) state.needJump = true;
     }
 
-    if (skill >= 2 && (gameLocal->time % 3000) < 400 && state.nearestEnemyDist > 300.0f) {
+    if (personality.aggression >= 0.7f && (gameLocal->time % 3000) < 400 && state.nearestEnemyDist > 300.0f) {
       cmd.buttons |= BUTTON_CROUCH;
     }
   } else if (client->GetPhysics()->GetLinearVelocity().Length() < 5.0f && (gameLocal->time % 2000) < 200) {

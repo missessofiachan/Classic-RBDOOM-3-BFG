@@ -322,6 +322,7 @@ public:
 	const char* 	GetTeamName( int team ) const;
 	const char* 	GetSkinName( int skin ) const;
 	const idVec3& 	GetSkinColor( int skin ) const;
+	const mpPlayerState_t& GetPlayerState( int clientNum ) const { return playerState[clientNum]; }
 	
 	idItemTeam* 	GetTeamFlag( int team );
 	flagStatus_t    GetFlagStatus( int team );
