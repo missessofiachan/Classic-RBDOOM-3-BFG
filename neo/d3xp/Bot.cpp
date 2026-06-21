@@ -685,8 +685,14 @@ void idBotState::BotActionAndEvasion(usercmd_t& cmd, botFrameState_t& state) {
   myBounds.ExpandSelf(64.0f); // Detection padding
 
   bool evading = false;
-  for (idEntity* ent = gameLocal->spawnedEntities.Next(); ent != NULL; ent = ent->spawnNode.Next()) {
-    if (!ent->IsType(idProjectile::Type)) {
+  idEntity* touch[MAX_GENTITIES];
+  idBounds evasionBounds = myBounds;
+  evasionBounds.ExpandSelf(800.0f);
+  int numTouch = gameLocal->GetClip()->EntitiesTouchingBounds(evasionBounds, -1, touch, MAX_GENTITIES);
+
+  for (int i = 0; i < numTouch; i++) {
+    idEntity* ent = touch[i];
+    if (!ent || !ent->IsType(idProjectile::Type)) {
       continue;
     }
 
