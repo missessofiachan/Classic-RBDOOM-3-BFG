@@ -41,6 +41,9 @@ terms, you may contact in writing id Software LLC, c/o ZeniMax Media Inc., Suite
 #include "Game_local.h"
 // #include "../framework/Common_dialog.h"
 // #include "../framework/Common_local.h"
+#include "PlayerIcon.h"
+#include "AimAssist.h"
+#include "Bot.h"
 #include "PredictedValue_impl.h"
 
 idCVar
@@ -1358,6 +1361,8 @@ idPlayer::idPlayer()
   spawnAnglesSet = false;
   spawnAngles = ang_zero;
   viewAngles = ang_zero;
+  
+  botAI = NULL;
   cmdAngles = ang_zero;
   independentWeaponPitchAngle = 0.0f;
 
@@ -1544,12 +1549,7 @@ idPlayer::idPlayer()
 
   isLagged = false;
   isBot = false;
-  botTargetItem = NULL;
-  botNextTargetSearchTime = 0;
-  botTargetPos.Zero();
-  botHasTargetPos = false;
-  botWanderYaw = 0.0f;
-  botWanderTime = 0;
+
   isChatting = 0;
 
   selfSmooth = false;
@@ -1923,6 +1923,10 @@ void idPlayer::Spawn() {
   if (common->IsMultiplayer()) {
     isBot = session->GetActingGameStateLobbyBase().GetLobbyUserIsBot(
         gameLocal->lobbyUserIDs[entityNumber]);
+        
+    if (isBot && !botAI) {
+      botAI = new idBotState(this);
+    }
   }
 
   // allow thinking during cinematics
@@ -2147,6 +2151,10 @@ void idPlayer::Spawn() {
   }
   // GK:New map new flips
   pm_flip.SetBool(false);
+
+  for (int i = 0; i < MAX_WEAPONS; i++) {
+    botWeaponNames[i] = spawnArgs.GetString(va("def_weapon%d", i));
+  }
 }
 
 /*
@@ -2159,6 +2167,9 @@ Release any resources used by the player.
 idPlayer::~idPlayer() {
   delete weapon.GetEntity();
   weapon = NULL;
+
+  delete botAI;
+  botAI = NULL;
 
   delete flashlight.GetEntity();
   flashlight = NULL;
@@ -8236,12 +8247,6 @@ Called every tic for each player
 */
 void idPlayer::Think() {
   EvaluateControls();
-
-  // --- ADD THIS BLOCK ---
-  if (isBot) {
-    BotAI(usercmd);
-  }
-  // ----------------------
 
   if (!af.IsActive()) {
     AdjustBodyAngles();

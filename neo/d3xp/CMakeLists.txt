@@ -36,7 +36,6 @@ set(ID_GAME_INCLUDES
 	AF.h
 	AFEntity.h
 	AimAssist.h
-	Bot.h
 	BrittleFracture.h
 	Camera.h
 	Classic.h

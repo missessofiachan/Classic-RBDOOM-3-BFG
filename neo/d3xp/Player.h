@@ -38,7 +38,6 @@ terms, you may contact in writing id Software LLC, c/o ZeniMax Media Inc., Suite
 #define __GAME_PLAYER_H__
 
 #include "PredictedValue.h"
-#include "Bot.h"
 
 /*
 ===============================================================================
@@ -253,6 +252,8 @@ typedef struct {
 
 class idPlayer : public idActor {
 public:
+  friend class idBotState;
+  
   enum {
     EVENT_IMPULSE = idEntity::EVENT_MAXEVENTS,
     EVENT_EXIT_TELEPORTER,
@@ -415,12 +416,11 @@ public:
   bool isLagged;       // replicated from server, true if packets haven't been
                        // received from client.
   bool isBot;          // true if this player is controlled by AI bot logic.
-  idEntityPtr<idEntity> botTargetItem;
-  int botNextTargetSearchTime;
-  idVec3 botTargetPos;
-  bool botHasTargetPos;
-  float botWanderYaw;
-  int botWanderTime;
+  
+  class idBotState* botAI;
+
+  idStr botWeaponNames[MAX_WEAPONS];
+
   int isChatting; // replicated from server, true if the player is chatting.
 
   // timers
@@ -456,8 +456,6 @@ public:
 
   void Spawn();
   void Think();
-  void BotAI(usercmd_t & cmd);
-  int EvaluateBestWeapon(float enemyDist);
 
   void UpdateLaserSight();
 
@@ -744,7 +742,6 @@ public:
   void ResetProjectileKills() { numProjectileKills = 0; }
 
 private:
-  BotState botState;
 
   // Stats & achievements
   idAchievementManager achievementManager;

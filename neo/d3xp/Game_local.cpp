@@ -32,6 +32,7 @@ If you have questions concerning this license or the applicable additional terms
 #pragma hdrstop
 
 #include "Game_local.h"
+#include "Bot.h"
 #include "GameEdit.h"
 
 #ifdef GAME_DLL
@@ -3000,9 +3001,9 @@ position and firecount to the usercmd.
 */
 void idGameLocal::RunSingleUserCmd( usercmd_t& cmd, idPlayer& player )
 {
-	if( player.isBot )
+	if( player.isBot && player.botAI )
 	{
-		player.BotAI( cmd );
+		player.botAI->Think( cmd );
 	}
 	
 	player.HandleUserCmds( cmd );

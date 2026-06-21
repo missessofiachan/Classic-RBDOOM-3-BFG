@@ -1,35 +1,53 @@
-/*
-===========================================================================
-Doom 3 BFG Edition GPL Source Code
-===========================================================================
-*/
-
 #ifndef __BOT_H__
 #define __BOT_H__
 
-// A clean struct to hold our bot's brain state without cluttering idPlayer
-struct BotState {
-  // Performance Throttling
-  int nextPathTime;
-  idVec3 cachedMoveDir;
-  bool cachedNeedJump;
+class idPlayer;
 
-  // Combat & Weapon Systems
-  int nextWeaponSwitchTime;
+class idBotState {
+public:
+	idBotState(idPlayer* owner);
+	~idBotState();
 
-  // Combat Movement
-  int strafeDir;
-  int nextStrafeChangeTime;
+	void Think(usercmd_t& cmd);
+	void Save(idSaveGame *savefile) const;
+	void Restore(idRestoreGame *savefile);
 
-  // Constructor to initialize everything safely
-  BotState() {
-    nextPathTime = 0;
-    cachedMoveDir.Zero();
-    cachedNeedJump = false;
-    nextWeaponSwitchTime = 0;
-    strafeDir = 1;
-    nextStrafeChangeTime = 0;
-  }
+private:
+	idPlayer* client;
+
+	struct botFrameState_t {
+		idPlayer* nearestEnemy;
+		float nearestEnemyDist;
+		bool enemyVisible;
+		idVec3 moveDir;
+		bool hasMoveDir;
+		bool needJump;
+	};
+
+	void BotSensoryAcquisition(botFrameState_t& state);
+	void BotTargetPositionSelection(botFrameState_t& state);
+	void BotNavigationPathfinding(botFrameState_t& state);
+	void BotAimingAndRotation(usercmd_t& cmd, botFrameState_t& state);
+	void BotCombatStrafing(usercmd_t& cmd, botFrameState_t& state);
+	void BotActionAndEvasion(usercmd_t& cmd, botFrameState_t& state);
+	void BotLedgeAvoidance(usercmd_t& cmd, botFrameState_t& state);
+
+	int EvaluateBestWeapon(float enemyDist);
+
+	// Bot AI state variables
+	idEntityPtr<idEntity> botTargetItem;
+	int botNextTargetSearchTime;
+	idVec3 botTargetPos;
+	bool botHasTargetPos;
+	float botWanderYaw;
+	int botWanderTime;
+
+	int botNextPathTime;
+	idVec3 botCachedMoveDir;
+	bool botCachedNeedJump;
+	int botNextWeaponSwitchTime;
+	int botStrafeDir;
+	int botNextStrafeChangeTime;
 };
 
-#endif /* !__BOT_H__ */
+#endif // __BOT_H__
