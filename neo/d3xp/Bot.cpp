@@ -571,6 +571,11 @@ void idBotState::BotAimingAndRotation(usercmd_t& cmd, botFrameState_t& state) {
     float timeToHit = dist / projSpeed;
     idVec3 predictedPos = enemyPos + (enemyVel * timeToHit);
 
+    // 1. Radial Splash Aiming
+    if (idStr::Icmp(currentWeaponName, "weapon_rocketlauncher") == 0) {
+      predictedPos.z -= 48.0f; // Aim at the floor in front of their feet
+    }
+
     idVec3 dirToEnemy = predictedPos - myEye;
     dirToEnemy.Normalize();
     idAngles faceAngles = dirToEnemy.ToAngles();
@@ -619,6 +624,18 @@ void idBotState::BotActionAndEvasion(usercmd_t& cmd, botFrameState_t& state) {
   bool skipShoot = false;
   if (skill == 0) skipShoot = ((gameLocal->time % 10) < 4);
   else if (skill == 1) skipShoot = ((gameLocal->time % 10) < 2);
+
+  // 3. Fire Throttling / Trigger Discipline
+  const char *currentWeaponName = "";
+  int curWep = client->idealWeapon.Get();
+  if (curWep >= 0 && curWep < MAX_WEAPONS) {
+    currentWeaponName = client->botWeaponNames[curWep].c_str();
+  }
+  if (state.nearestEnemyDist > 800.0f && (idStr::Icmp(currentWeaponName, "weapon_machinegun") == 0 || idStr::Icmp(currentWeaponName, "weapon_chaingun") == 0)) {
+    if (gameLocal->random.RandomFloat() > personality.accuracy) {
+      skipShoot = true; // Burst firing at long range
+    }
+  }
 
   idVec3 myOrigin = client->GetPhysics()->GetOrigin();
   idBounds myBounds = client->GetPhysics()->GetBounds();
@@ -752,6 +769,15 @@ void idBotState::BotCombatStrafing(usercmd_t& cmd, botFrameState_t& state) {
       idealDist = 120.0f;
     } else if (idStr::Icmp(currentWeaponName, "weapon_rocketlauncher") == 0 || idStr::Icmp(currentWeaponName, "weapon_machinegun") == 0) {
       idealDist = 600.0f;
+    }
+
+    // 2. Tactical Retreats
+    bool wantsToRetreat = false;
+    if (client->health < 25 && state.nearestEnemyDist < 600.0f) wantsToRetreat = true;
+    if (idStr::Icmp(currentWeaponName, "weapon_fists") == 0 && state.nearestEnemyDist > 120.0f) wantsToRetreat = true;
+
+    if (wantsToRetreat) {
+      idealDist = 1500.0f; // Maximize distance to trigger backpedaling
     }
 
     int forwardSpeed = 0;
