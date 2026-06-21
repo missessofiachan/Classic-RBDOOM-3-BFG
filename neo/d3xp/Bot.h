@@ -75,6 +75,9 @@ private:
 	int botNextWeaponSwitchTime;
 	int botStrafeDir;
 	int botNextStrafeChangeTime;
+
+	int botNextFireTime;
+	bool enemyWasVisible;
 };
 
 #endif // __BOT_H__

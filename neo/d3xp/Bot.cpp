@@ -277,6 +277,18 @@ void idBotState::BotSensoryAcquisition(botFrameState_t& state) {
     gameLocal->GetClip()->TracePoint(tr, myEye, other->GetEyePosition(), MASK_SHOT_RENDERMODEL, client);
     bool currentEnemyVisible = (tr.fraction >= 1.0f || tr.c.entityNum == other->entityNumber);
 
+    if (currentEnemyVisible) {
+      // 1. & 2. True Field of Vision & Acoustic Hearing
+      idVec3 dirToEnemy = other->GetEyePosition() - myEye;
+      dirToEnemy.Normalize();
+      idVec3 viewForward = client->viewAngles.ToForward();
+      
+      bool heardEnemy = (other->GetPhysics()->GetLinearVelocity().Length() > 200.0f);
+      if (!heardEnemy && (viewForward * dirToEnemy < 0.5f)) { // Outside 120-degree FOV cone
+        currentEnemyVisible = false;
+      }
+    }
+
     if ((currentEnemyVisible && !state.enemyVisible) ||
         (currentEnemyVisible == state.enemyVisible && distSqr < bestEnemyDistSqr)) {
       bestEnemyDistSqr = distSqr;
@@ -284,6 +296,14 @@ void idBotState::BotSensoryAcquisition(botFrameState_t& state) {
       state.enemyVisible = currentEnemyVisible;
     }
   }
+  
+  if (state.enemyVisible && !enemyWasVisible) {
+    // 3. Reaction Time Delay
+    int delay = 100 + (int)((1.0f - personality.aggression) * 300.0f);
+    botNextFireTime = gameLocal->time + delay;
+  }
+  enemyWasVisible = state.enemyVisible;
+
   state.nearestEnemyDist = (state.nearestEnemy != NULL) ? idMath::Sqrt(bestEnemyDistSqr) : 999999.0f;
 }
 
@@ -666,7 +686,9 @@ void idBotState::BotActionAndEvasion(usercmd_t& cmd, botFrameState_t& state) {
       }
     }
 
-    if (state.nearestEnemyDist < 1500.0f && !skipShoot) cmd.buttons |= BUTTON_ATTACK;
+    if (state.nearestEnemyDist < 1500.0f && !skipShoot && gameLocal->time > botNextFireTime) {
+      cmd.buttons |= BUTTON_ATTACK;
+    }
 
     if (skill > 0) {
       int jumpInterval = (skill >= 3) ? 1200 : 2500;
