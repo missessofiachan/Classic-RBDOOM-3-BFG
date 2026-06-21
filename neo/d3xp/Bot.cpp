@@ -10,11 +10,89 @@ Doom 3 BFG Edition GPL Source Code
 
 #include "../aas/AASFile.h"
 #include "Game_local.h"
+#include "Item.h"
+#include "Projectile.h"
 #include "Bot.h"
 
 idCVar bot_skill(
     "bot_skill", "1", CVAR_INTEGER | CVAR_GAME,
     "Bot skill level (0 = Easy, 1 = Medium, 2 = Hard, 3 = Nightmare)");
+
+
+
+/*
+==================
+idBotState::EvaluateMapGoals
+==================
+*/
+void idBotState::EvaluateMapGoals(botFrameState_t &state) {
+  if (gameLocal->time < botNextTargetSearchTime) {
+    return;
+  }
+  botNextTargetSearchTime = gameLocal->time + 1000;
+
+  float bestScore = -1.0f;
+  idItem *bestItem = NULL;
+
+  float healthNeed = 1.0f;
+  if (client->health < 30) {
+    healthNeed = 10.0f; 
+  } else if (client->health < 80) {
+    healthNeed = 3.0f;
+  }
+
+  float armorNeed = 1.0f;
+  if (client->inventory.armor < 50) {
+    armorNeed = 3.0f;
+  }
+
+  for (idEntity* ent = gameLocal->spawnedEntities.Next(); ent != NULL; ent = ent->spawnNode.Next()) {
+    if (!ent->IsType(idItem::Type)) {
+      continue;
+    }
+
+    idItem* item = static_cast<idItem*>(ent);
+    if (item->IsHidden() || item->IsType(idMoveableItem::Type)) {
+      continue; 
+    }
+
+    float dist = (item->GetPhysics()->GetOrigin() - client->GetPhysics()->GetOrigin()).LengthFast();
+    if (dist > 3000.0f) {
+      continue;
+    }
+
+    float itemWeight = 1.0f;
+    const char* classname = item->spawnArgs.GetString("classname", "");
+
+    if (idStr::Icmpn(classname, "item_medkit", 11) == 0 || idStr::Icmpn(classname, "item_health", 11) == 0) {
+      itemWeight = 5.0f * healthNeed;
+    } else if (idStr::Icmpn(classname, "item_armor", 10) == 0) {
+      itemWeight = 5.0f * armorNeed;
+    } else if (idStr::Icmpn(classname, "weapon_", 7) == 0) {
+      itemWeight = 8.0f; 
+      if (personality.preferredWeapon >= 0 && personality.preferredWeapon < MAX_WEAPONS) {
+        if (idStr::Icmp(classname, client->botWeaponNames[personality.preferredWeapon].c_str()) == 0) {
+          itemWeight = 30.0f; // Strongly prefer this weapon!
+        }
+      }
+    } else if (idStr::Icmpn(classname, "ammo_", 5) == 0) {
+      itemWeight = 2.0f;
+    }
+
+    float score = itemWeight / ((dist + 100.0f) * 0.01f);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestItem = item;
+    }
+  }
+
+  if (bestItem) {
+    currentGoalItem = bestItem;
+    botTargetPos = bestItem->GetPhysics()->GetOrigin();
+    botHasTargetPos = true;
+  }
+}
 
 /*
 ==================
@@ -33,7 +111,20 @@ idBotState::idBotState(idPlayer* owner) {
 	botCachedNeedJump = false;
 	botNextWeaponSwitchTime = 0;
 	botStrafeDir = 1;
-	botNextStrafeChangeTime = 0;
+  botNextStrafeChangeTime = 0;
+
+  // Random Personality
+  personality.accuracy = 0.2f + gameLocal->random.RandomFloat() * 0.8f;
+  personality.aggression = gameLocal->random.RandomFloat();
+  personality.jumpFrequency = gameLocal->random.RandomFloat();
+  
+  if (gameLocal->random.RandomFloat() > 0.5f) {
+    personality.preferredWeapon = 1 + gameLocal->random.RandomInt(9);
+  } else {
+    personality.preferredWeapon = -1;
+  }
+  
+  currentGoalItem = NULL;
 }
 
 idBotState::~idBotState() {
@@ -52,6 +143,12 @@ void idBotState::Save(idSaveGame *savefile) const {
 	savefile->WriteInt(botNextWeaponSwitchTime);
 	savefile->WriteInt(botStrafeDir);
 	savefile->WriteInt(botNextStrafeChangeTime);
+
+	savefile->WriteFloat(personality.accuracy);
+	savefile->WriteFloat(personality.aggression);
+	savefile->WriteFloat(personality.jumpFrequency);
+	savefile->WriteInt(personality.preferredWeapon);
+	currentGoalItem.Save(savefile);
 }
 
 void idBotState::Restore(idRestoreGame *savefile) {
@@ -67,6 +164,12 @@ void idBotState::Restore(idRestoreGame *savefile) {
 	savefile->ReadInt(botNextWeaponSwitchTime);
 	savefile->ReadInt(botStrafeDir);
 	savefile->ReadInt(botNextStrafeChangeTime);
+
+	savefile->ReadFloat(personality.accuracy);
+	savefile->ReadFloat(personality.aggression);
+	savefile->ReadFloat(personality.jumpFrequency);
+	savefile->ReadInt(personality.preferredWeapon);
+	currentGoalItem.Restore(savefile);
 }
 
 struct WeaponFuzzyRule {
@@ -128,6 +231,10 @@ int idBotState::EvaluateBestWeapon(float enemyDist) {
         }
         break;
       }
+    }
+
+    if (wp == personality.preferredWeapon) {
+      score *= 2.0f; // Personality bonus
     }
 
     if (score > bestScore) {
@@ -450,50 +557,11 @@ void idBotState::BotAimingAndRotation(usercmd_t& cmd, botFrameState_t& state) {
     }
   }
 }
-
-void idBotState::BotCombatStrafing(usercmd_t& cmd, botFrameState_t& state) {
-  if (state.enemyVisible && state.nearestEnemy) {
-    if (gameLocal->time >= botNextStrafeChangeTime) {
-      botNextStrafeChangeTime = gameLocal->time + 800 + gameLocal->random.RandomInt(700);
-      botStrafeDir = (gameLocal->random.RandomFloat() > 0.5f) ? 1 : -1;
-    }
-
-    float idealDist = 400.0f;
-    const char *currentWeaponName = "";
-    int curWep = client->idealWeapon.Get();
-    if (curWep >= 0 && curWep < MAX_WEAPONS) {
-      currentWeaponName = client->botWeaponNames[curWep].c_str();
-    }
-    if (idStr::Icmp(currentWeaponName, "weapon_shotgun") == 0 || idStr::Icmp(currentWeaponName, "weapon_doublebarrel") == 0) {
-      idealDist = 120.0f;
-    } else if (idStr::Icmp(currentWeaponName, "weapon_rocketlauncher") == 0 || idStr::Icmp(currentWeaponName, "weapon_machinegun") == 0) {
-      idealDist = 600.0f;
-    }
-
-    int forwardSpeed = 0;
-    if (state.nearestEnemyDist > idealDist + 80.0f) forwardSpeed = 127;
-    else if (state.nearestEnemyDist < idealDist - 80.0f) forwardSpeed = -127;
-
-    cmd.forwardmove = forwardSpeed;
-    cmd.rightmove = botStrafeDir * 127;
-  } else if (state.hasMoveDir) {
-    idVec3 desiredVelocity = state.moveDir;
-    desiredVelocity.z = 0;
-    if (desiredVelocity.Length() > 0.1f) {
-      desiredVelocity.Normalize();
-      idAngles viewYaw(0, client->viewAngles.yaw, 0);
-      idVec3 forward, right;
-      viewYaw.ToVectors(&forward, &right);
-
-      float forwardSpeed = desiredVelocity * forward;
-      float rightSpeed = desiredVelocity * right;
-
-      cmd.forwardmove = idMath::ClampInt(-127, 127, (int)(forwardSpeed * 127.0f));
-      cmd.rightmove = idMath::ClampInt(-127, 127, (int)(rightSpeed * 127.0f));
-    }
-  }
-}
-
+/*
+==================
+idBotState::BotActionAndEvasion
+==================
+*/
 void idBotState::BotActionAndEvasion(usercmd_t& cmd, botFrameState_t& state) {
   int skill = bot_skill.GetInteger();
   bool skipShoot = false;
@@ -501,6 +569,60 @@ void idBotState::BotActionAndEvasion(usercmd_t& cmd, botFrameState_t& state) {
   else if (skill == 1) skipShoot = ((gameLocal->time % 10) < 2);
 
   idVec3 myOrigin = client->GetPhysics()->GetOrigin();
+  idBounds myBounds = client->GetPhysics()->GetBounds();
+  myBounds.ExpandSelf(64.0f); // Detection padding
+
+  bool evading = false;
+  for (idEntity* ent = gameLocal->spawnedEntities.Next(); ent != NULL; ent = ent->spawnNode.Next()) {
+    if (!ent->IsType(idProjectile::Type)) {
+      continue;
+    }
+
+    idProjectile* proj = static_cast<idProjectile*>(ent);
+    idVec3 projVel = proj->GetPhysics()->GetLinearVelocity();
+    idVec3 projOrigin = proj->GetPhysics()->GetOrigin();
+    
+    // Ignore stationary projectiles or our own
+    if (projVel.LengthSqr() < 10.0f || proj->GetOwner() == client) {
+      continue;
+    }
+
+    // Is it heading towards us?
+    idVec3 toProj = projOrigin - myOrigin;
+    if (projVel * toProj < 0.0f) { // Approaching
+      float dist = toProj.Length();
+      if (dist < 800.0f) { // Within threat range
+        idVec3 projDir = projVel;
+        projDir.Normalize();
+        
+        // Closest point on line to our origin
+        idVec3 toBot = myOrigin - projOrigin;
+        idVec3 closePoint = projOrigin + projDir * (toBot * projDir);
+        
+        // Is the closest point inside our expanded bounds?
+        if (myBounds.ContainsPoint(closePoint - myOrigin)) {
+          // Incoming! Evasion maneuver
+          if (gameLocal->random.RandomFloat() < personality.jumpFrequency * 2.0f) {
+            cmd.buttons |= BUTTON_JUMP; // Jump
+          }
+          if (gameLocal->random.RandomFloat() > 0.5f) {
+            cmd.rightmove = 127; // Strafe right
+          } else {
+            cmd.rightmove = -128; // Strafe left
+          }
+          evading = true;
+          break;
+        }
+      }
+    }
+  }
+
+  // General random evasion
+  if (!evading && client->health < client->inventory.maxHealth * 0.5f && gameLocal->random.RandomFloat() > 0.95f) {
+    if (gameLocal->random.RandomFloat() < personality.jumpFrequency) {
+      cmd.buttons |= BUTTON_JUMP;
+    }
+  }
 
   if (state.enemyVisible && state.nearestEnemy) {
     if (gameLocal->time >= botNextWeaponSwitchTime) {
@@ -555,6 +677,56 @@ void idBotState::BotActionAndEvasion(usercmd_t& cmd, botFrameState_t& state) {
       }
     } else {
       state.needJump = true;
+    }
+  }
+}
+
+void idBotState::BotCombatStrafing(usercmd_t& cmd, botFrameState_t& state) {
+  if (state.enemyVisible && state.nearestEnemy) {
+    if (gameLocal->time >= botNextStrafeChangeTime) {
+      botNextStrafeChangeTime = gameLocal->time + 800 + gameLocal->random.RandomInt(700);
+      botStrafeDir = (gameLocal->random.RandomFloat() > 0.5f) ? 1 : -1;
+    }
+
+    float idealDist = 400.0f;
+    const char *currentWeaponName = "";
+    int curWep = client->idealWeapon.Get();
+    if (curWep >= 0 && curWep < MAX_WEAPONS) {
+      currentWeaponName = client->botWeaponNames[curWep].c_str();
+    }
+    if (idStr::Icmp(currentWeaponName, "weapon_shotgun") == 0 || idStr::Icmp(currentWeaponName, "weapon_doublebarrel") == 0) {
+      idealDist = 120.0f;
+    } else if (idStr::Icmp(currentWeaponName, "weapon_rocketlauncher") == 0 || idStr::Icmp(currentWeaponName, "weapon_machinegun") == 0) {
+      idealDist = 600.0f;
+    }
+
+    int forwardSpeed = 0;
+    if (state.nearestEnemyDist > idealDist + 80.0f) forwardSpeed = 127;
+    else if (state.nearestEnemyDist < idealDist - 80.0f) forwardSpeed = -127;
+
+    cmd.forwardmove = forwardSpeed;
+    cmd.rightmove = botStrafeDir * 127;
+  } else if (state.hasMoveDir) {
+    idVec3 desiredVelocity = state.moveDir;
+    desiredVelocity.z = 0;
+    if (desiredVelocity.Length() > 0.1f) {
+      desiredVelocity.Normalize();
+      idAngles viewYaw(0, client->viewAngles.yaw, 0);
+      idVec3 forward, right;
+      viewYaw.ToVectors(&forward, &right);
+
+      float forwardSpeed = desiredVelocity * forward;
+      float rightSpeed = desiredVelocity * right;
+
+      cmd.forwardmove = idMath::ClampInt(-127, 127, (int)(forwardSpeed * 127.0f));
+      cmd.rightmove = idMath::ClampInt(-127, 127, (int)(rightSpeed * 127.0f));
+      
+      // Strafe jumping mechanic for faster navigation
+      if (state.nearestEnemyDist > 800.0f && gameLocal->random.RandomFloat() < personality.jumpFrequency) {
+        if ((gameLocal->time % 800) < 100) {
+            cmd.buttons |= BUTTON_JUMP;
+        }
+      }
     }
   }
 }
@@ -621,6 +793,7 @@ void idBotState::Think(usercmd_t &cmd) {
 
   botFrameState_t state;
   BotSensoryAcquisition(state);
+  EvaluateMapGoals(state);
   BotTargetPositionSelection(state);
   BotNavigationPathfinding(state);
   BotAimingAndRotation(cmd, state);

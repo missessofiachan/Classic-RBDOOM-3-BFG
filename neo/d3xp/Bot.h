@@ -2,7 +2,30 @@
 #define __BOT_H__
 
 class idPlayer;
+class idItem;
+class idEntity;
 
+/*
+===============================================================================
+
+        Bot Personality
+        
+===============================================================================
+*/
+struct BotPersonality {
+	float accuracy;       // 0.0 (terrible) to 1.0 (perfect)
+	float aggression;     // 0.0 (coward) to 1.0 (pusher)
+	float jumpFrequency;  // 0.0 (grounded) to 1.0 (kangaroo)
+	int preferredWeapon;  // Weapon index, or -1 for none
+};
+
+/*
+===============================================================================
+
+        Bot State
+
+===============================================================================
+*/
 class idBotState {
 public:
 	idBotState(idPlayer* owner);
@@ -11,6 +34,9 @@ public:
 	void Think(usercmd_t& cmd);
 	void Save(idSaveGame *savefile) const;
 	void Restore(idRestoreGame *savefile);
+
+	BotPersonality personality;
+	idEntityPtr<idItem> currentGoalItem;
 
 private:
 	idPlayer* client;
@@ -25,6 +51,7 @@ private:
 	};
 
 	void BotSensoryAcquisition(botFrameState_t& state);
+	void EvaluateMapGoals(botFrameState_t& state);
 	void BotTargetPositionSelection(botFrameState_t& state);
 	void BotNavigationPathfinding(botFrameState_t& state);
 	void BotAimingAndRotation(usercmd_t& cmd, botFrameState_t& state);
