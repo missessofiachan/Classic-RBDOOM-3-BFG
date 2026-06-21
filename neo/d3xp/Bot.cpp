@@ -79,16 +79,27 @@ void idBotState::EvaluateMapGoals(botFrameState_t &state) {
   float bestScore = -1.0f;
   idItem *bestItem = NULL;
 
+  // "Fuzzy Logic" Exponential Item Weighting
   float healthNeed = 1.0f;
-  if (client->health < 30) {
-    healthNeed = 10.0f; 
+  if (client->health <= 0) {
+    healthNeed = 0.0f;
+  } else if (client->health < 25) {
+    healthNeed = 50.0f; // Massive priority
+  } else if (client->health < 50) {
+    healthNeed = 20.0f;
   } else if (client->health < 80) {
-    healthNeed = 3.0f;
+    healthNeed = 5.0f;
+  } else if (client->health >= 100) {
+    healthNeed = 0.1f; // Ignore health if full
   }
 
   float armorNeed = 1.0f;
-  if (client->inventory.armor < 50) {
-    armorNeed = 3.0f;
+  if (client->inventory.armor < 25) {
+    armorNeed = 30.0f;
+  } else if (client->inventory.armor < 50) {
+    armorNeed = 10.0f;
+  } else if (client->inventory.armor >= 100) {
+    armorNeed = 0.1f;
   }
 
   for (idEntity* ent = gameLocal->spawnedEntities.Next(); ent != NULL; ent = ent->spawnNode.Next()) {
@@ -113,6 +124,8 @@ void idBotState::EvaluateMapGoals(botFrameState_t &state) {
       itemWeight = 5.0f * healthNeed;
     } else if (idStr::Icmpn(classname, "item_armor", 10) == 0) {
       itemWeight = 5.0f * armorNeed;
+    } else if (idStr::Icmpn(classname, "item_powerup", 12) == 0 || idStr::Icmpn(classname, "item_megahealth", 15) == 0) {
+      itemWeight = 200.0f; // Absolute priority for powerups/megahealth
     } else if (idStr::Icmpn(classname, "weapon_", 7) == 0) {
       itemWeight = 8.0f; 
       if (personality.preferredWeapon >= 0 && personality.preferredWeapon < MAX_WEAPONS) {
@@ -681,9 +694,32 @@ void idBotState::BotActionAndEvasion(usercmd_t& cmd, botFrameState_t& state) {
     idVec3 projVel = proj->GetPhysics()->GetLinearVelocity();
     idVec3 projOrigin = proj->GetPhysics()->GetOrigin();
     
-    // Ignore stationary projectiles or our own
-    if (projVel.LengthSqr() < 10.0f || proj->GetOwner() == client) {
+    bool isGrenade = (idStr::Icmp(proj->spawnArgs.GetString("classname", ""), "projectile_grenade") == 0 ||
+                      idStr::Icmp(proj->spawnArgs.GetString("classname", ""), "projectile_bfg") == 0);
+
+    // Ignore stationary projectiles (unless it's a grenade) or our own
+    if ((projVel.LengthSqr() < 10.0f && !isGrenade) || proj->GetOwner() == client) {
       continue;
+    }
+
+    if (isGrenade) {
+      // Grenades might be stationary or moving slowly, we want to run away from them
+      idVec3 toProj = projOrigin - myOrigin;
+      float dist = toProj.Length();
+      if (dist < 300.0f) {
+        // Evasion mode! Run away perpendicularly or just directly away
+        idVec3 runAwayDir = myOrigin - projOrigin;
+        runAwayDir.z = 0;
+        runAwayDir.Normalize();
+        
+        state.moveDir = runAwayDir;
+        state.hasMoveDir = true;
+        if (gameLocal->random.RandomFloat() < 0.5f) {
+            cmd.buttons |= BUTTON_JUMP; // Jump away!
+        }
+        evading = true;
+        break; // Only dodge one grenade at a time
+      }
     }
 
     // Is it heading towards us?
@@ -833,6 +869,7 @@ void idBotState::BotCombatStrafing(usercmd_t& cmd, botFrameState_t& state) {
       
       // Strafe jumping mechanic for faster navigation
       if (state.nearestEnemyDist > 800.0f && gameLocal->random.RandomFloat() < personality.jumpFrequency) {
+        cmd.buttons |= BUTTON_RUN; // Sprint when traversing
         if ((gameLocal->time % 800) < 100) {
             cmd.buttons |= BUTTON_JUMP;
         }
