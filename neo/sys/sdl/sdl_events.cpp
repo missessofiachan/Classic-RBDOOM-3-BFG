@@ -434,6 +434,7 @@ static size_t uniStrPos = 0;
 // so scrolling in menus stops after one step
 static int mwheelRel = 0;
 static int32 uniChar = 0;
+static bool gravePressed = false;
 
 // void PushJoyButton( int key, bool value )
 // {
@@ -617,6 +618,7 @@ void SDL_Poll()
 			{
 				key = K_GRAVE;
 				uniChar = K_BACKSPACE; // bad hack to get empty console inputline..
+				gravePressed = (ev.type == SDL_EVENT_KEY_DOWN);
 			} // DG end, the original code is in the else case
 			else
 			{
@@ -655,7 +657,9 @@ void SDL_Poll()
 				//res.evType = SE_CHAR;
 				//res.evValue = uniStr[0];
 				if (Sys_GetConsoleKey(false) == uniStr[0] || Sys_GetConsoleKey(true) == uniStr[0]) {
-					Sys_QueEvent(SE_KEY, K_GRAVE, 1, 0, NULL, 0);
+					if (!gravePressed) {
+						Sys_QueEvent(SE_KEY, K_GRAVE, 1, 0, NULL, 0);
+					}
 				} else {
 					Sys_QueEvent(SE_CHAR, uniStr[0], 1, 0, NULL, 0);
 				}
